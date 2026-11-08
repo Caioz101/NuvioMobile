@@ -1,5 +1,7 @@
 package com.nuvio.app.features.downloads
 
+import com.nuvio.app.features.p2p.P2pSettingsRepository
+import com.nuvio.app.features.p2p.buildP2pMagnetUri
 import com.nuvio.app.features.player.SubtitleRequestExtras
 import com.nuvio.app.features.player.addonSubtitleRequests
 import com.nuvio.app.features.streams.StreamItem
@@ -127,12 +129,27 @@ object DownloadsRepository {
     ): DownloadEnqueueResult {
         ensureLoaded()
 
-        val sourceUrl = stream.playableDirectUrl
+        val directUrl = stream.playableDirectUrl
             ?.trim()
             ?.takeIf { it.isNotBlank() }
-            ?: return DownloadEnqueueResult.MissingUrl
+        val torrentInfoHash = if (directUrl == null && stream.isTorrentStream) stream.p2pInfoHash else null
 
-        if (!sourceUrl.isSupportedDownloadUrl()) {
+        if (directUrl == null && torrentInfoHash == null) {
+            return DownloadEnqueueResult.MissingUrl
+        }
+
+        if (torrentInfoHash != null) {
+            P2pSettingsRepository.ensureLoaded()
+            if (!P2pSettingsRepository.isVisible || !P2pSettingsRepository.uiState.value.p2pEnabled) {
+                return DownloadEnqueueResult.P2pDisabled
+            }
+        }
+
+        val sourceUrl = directUrl ?: runCatching {
+            buildP2pMagnetUri(torrentInfoHash!!, stream.p2pTrackers)
+        }.getOrNull() ?: return DownloadEnqueueResult.UnsupportedFormat
+
+        if (directUrl != null && !sourceUrl.isSupportedDownloadUrl()) {
             return DownloadEnqueueResult.UnsupportedFormat
         }
 
@@ -161,7 +178,11 @@ object DownloadsRepository {
             episodeNumber = episodeNumber,
             episodeTitle = episodeTitle,
             fallbackTitle = stream.streamLabel,
-            sourceUrl = sourceUrl,
+            sourceUrl = if (torrentInfoHash != null) {
+                stream.behaviorHints.filename?.takeIf { it.isNotBlank() } ?: sourceUrl
+            } else {
+                sourceUrl
+            },
             downloadId = downloadId,
         )
 
@@ -200,6 +221,10 @@ object DownloadsRepository {
             errorMessage = null,
             createdAtEpochMs = now,
             updatedAtEpochMs = now,
+            p2pInfoHash = torrentInfoHash,
+            p2pFileIdx = if (torrentInfoHash != null) stream.p2pFileIdx else null,
+            p2pFilename = if (torrentInfoHash != null) stream.behaviorHints.filename else null,
+            p2pTrackers = if (torrentInfoHash != null) stream.p2pTrackers else emptyList(),
         )
 
         currentItems.add(0, item)

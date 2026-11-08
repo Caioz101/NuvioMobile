@@ -1933,6 +1933,7 @@
     <string name="downloads_enqueue_replaced">Download anterior substituído</string>
     <string name="downloads_enqueue_started">Download iniciado</string>
     <string name="downloads_enqueue_unsupported_format">Formato de stream não suportado para downloads</string>
+    <string name="downloads_enqueue_p2p_disabled">Ative o P2P nas Configurações para baixar streams torrent</string>
     <string name="downloads_error_empty_body">Corpo da resposta vazio</string>
     <string name="downloads_error_finalize_failed">Falha ao finalizar o arquivo de download</string>
     <string name="downloads_error_http_failed">A solicitação falhou (HTTP %1$d)</string>

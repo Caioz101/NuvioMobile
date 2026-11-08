@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.coroutines.runBlocking
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.downloads_enqueue_missing_url
+import nuvio.composeapp.generated.resources.downloads_enqueue_p2p_disabled
 import nuvio.composeapp.generated.resources.downloads_enqueue_replaced
 import nuvio.composeapp.generated.resources.downloads_enqueue_started
 import nuvio.composeapp.generated.resources.downloads_enqueue_unsupported_format
@@ -51,7 +52,14 @@ data class DownloadItem(
     val errorMessage: String? = null,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
+    val p2pInfoHash: String? = null,
+    val p2pFileIdx: Int? = null,
+    val p2pFilename: String? = null,
+    val p2pTrackers: List<String> = emptyList(),
 ) {
+    val isP2pTorrent: Boolean
+        get() = !p2pInfoHash.isNullOrBlank()
+
     val isEpisode: Boolean
         get() = seasonNumber != null && episodeNumber != null
 
@@ -91,7 +99,8 @@ enum class DownloadEnqueueResult {
     Started,
     Replaced,
     MissingUrl,
-    UnsupportedFormat;
+    UnsupportedFormat,
+    P2pDisabled;
 
     fun toastMessage(): String = runBlocking {
         when (this@DownloadEnqueueResult) {
@@ -99,6 +108,7 @@ enum class DownloadEnqueueResult {
             Replaced -> getString(Res.string.downloads_enqueue_replaced)
             MissingUrl -> getString(Res.string.downloads_enqueue_missing_url)
             UnsupportedFormat -> getString(Res.string.downloads_enqueue_unsupported_format)
+            P2pDisabled -> getString(Res.string.downloads_enqueue_p2p_disabled)
         }
     }
 }

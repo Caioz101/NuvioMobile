@@ -1,16 +1,22 @@
 package com.nuvio.app.features.downloads
 
 import com.nuvio.app.core.network.IPv4FirstDns
+import com.nuvio.app.features.p2p.P2pStreamRequest
+import com.nuvio.app.features.p2p.P2pStreamingEngine
+import com.nuvio.app.features.p2p.P2pStreamingState
 import com.nuvio.app.features.player.PlayerPlaybackNetworking
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -26,11 +32,85 @@ internal val downloadHttpClient = OkHttpClient.Builder()
 
 internal class DownloadHttpException(val statusCode: Int) : IOException("Download failed: HTTP $statusCode")
 
+/** Only one torrent download runs at a time, because the P2P engine serves a single stream. */
+private val p2pDownloadMutex = Mutex()
+
+@Volatile
+private var ownedP2pLocalUrl: String? = null
+
+private const val P2P_READ_TIMEOUT_MINUTES = 10L
+
 internal suspend fun transferAndroidDownload(
     item: DownloadItem,
     directory: File,
     validator: String?,
     client: OkHttpClient = downloadHttpClient,
+    onHeaders: (totalBytes: Long?, validator: String?) -> Unit,
+    onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+): File {
+    if (!item.isP2pTorrent) {
+        return transferHttpFile(item, item.sourceUrl, directory, validator, client, onHeaders, onProgress)
+    }
+    return p2pDownloadMutex.withLock {
+        val localUrl = startP2pDownloadStream(item)
+        try {
+            // Loopback connection to the torrent engine: do not bind it to a cellular/Wi-Fi network,
+            // and allow long reads while pieces are still arriving from peers.
+            val p2pClient = downloadHttpClient.newBuilder()
+                .readTimeout(P2P_READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+                .build()
+            transferHttpFile(item, localUrl, directory, validator, p2pClient, onHeaders, onProgress)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            val state = P2pStreamingEngine.state.value
+            if (state is P2pStreamingState.Streaming && state.localUrl != localUrl) {
+                throw DownloadInvalidContentException(
+                    "Download por torrent interrompido: outro torrent foi aberto no app. Retome depois.",
+                )
+            }
+            throw error
+        } finally {
+            stopP2pDownloadStream(localUrl)
+        }
+    }
+}
+
+private suspend fun startP2pDownloadStream(item: DownloadItem): String {
+    val infoHash = requireNotNull(item.p2pInfoHash)
+    val current = P2pStreamingEngine.state.value
+    if (current is P2pStreamingState.Streaming && current.localUrl != ownedP2pLocalUrl) {
+        throw DownloadInvalidContentException(
+            "Um torrent está sendo reproduzido. Pare a reprodução e retome o download.",
+        )
+    }
+    val localUrl = P2pStreamingEngine.startStream(
+        P2pStreamRequest(
+            infoHash = infoHash,
+            fileIdx = item.p2pFileIdx,
+            filename = item.p2pFilename,
+            trackers = item.p2pTrackers,
+        ),
+    )
+    ownedP2pLocalUrl = localUrl
+    return localUrl
+}
+
+private fun stopP2pDownloadStream(localUrl: String) {
+    if (ownedP2pLocalUrl == localUrl) ownedP2pLocalUrl = null
+    val state = P2pStreamingEngine.state.value
+    // Never stop a stream that belongs to the player.
+    if (state is P2pStreamingState.Streaming && state.localUrl == localUrl) {
+        P2pStreamingEngine.stopStream()
+    }
+}
+
+private suspend fun transferHttpFile(
+    item: DownloadItem,
+    sourceUrl: String,
+    directory: File,
+    validator: String?,
+    client: OkHttpClient,
     onHeaders: (totalBytes: Long?, validator: String?) -> Unit,
     onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
 ): File = coroutineScope {
@@ -45,7 +125,7 @@ internal suspend fun transferAndroidDownload(
 
             while (true) {
                 ensureActive()
-                val request = Request.Builder().url(item.sourceUrl).apply {
+                val request = Request.Builder().url(sourceUrl).apply {
                     item.sourceHeaders.forEach { (key, value) ->
                         if (!key.equals("Range", true) && !key.equals("If-Range", true) &&
                             !key.equals("Accept-Encoding", true)) header(key, value)

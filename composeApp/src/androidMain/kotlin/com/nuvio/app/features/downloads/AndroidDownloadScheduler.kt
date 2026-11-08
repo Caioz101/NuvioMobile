@@ -17,6 +17,8 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.nuvio.app.features.p2p.P2pSettingsStorage
+import com.nuvio.app.features.p2p.P2pStreamingEngine
 import java.io.File
 import java.io.IOException
 import java.net.Inet4Address
@@ -144,6 +146,11 @@ internal class AndroidDownloadScheduler(val context: Context) {
         val fileName = transfer.item.fileName
         if (!isActive(transfer)) return@withLock false
         val destination = File(directory, fileName)
+        if (transfer.item.isP2pTorrent) {
+            // The job can run in a fresh process without the main activity, so set up what the engine needs.
+            P2pSettingsStorage.initialize(context)
+            P2pStreamingEngine.initialize(context)
+        }
         val client = if (network != null) {
             downloadHttpClient.newBuilder()
                 .socketFactory(network.socketFactory)
