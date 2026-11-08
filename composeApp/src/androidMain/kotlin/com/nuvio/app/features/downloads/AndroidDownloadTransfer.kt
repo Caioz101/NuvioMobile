@@ -127,3 +127,30 @@ internal fun parseDownloadContentRange(value: String): Pair<Long, Long?>? {
     if (end < start || (total != null && end >= total)) return null
     return start to total
 }
+
+internal class DownloadInvalidContentException(message: String) : Exception(message)
+
+/**
+ * Detects "downloads" that are really a tiny text response (HLS playlist, JSON/HTML error page)
+ * instead of a media file. Returns a human-readable reason, or null when the file looks fine.
+ */
+internal fun detectUnexpectedTextResponse(file: File): String? {
+    val size = file.length()
+    if (size <= 0L || size > 1_048_576L) return null
+    val head = ByteArray(minOf(size, 400L).toInt())
+    val read = file.inputStream().use { it.read(head) }
+    if (read <= 0) return null
+    var printable = 0
+    for (i in 0 until read) {
+        val b = head[i].toInt()
+        if (b == 9 || b == 10 || b == 13 || b in 32..126) printable++
+    }
+    if (printable.toDouble() / read < 0.85) return null
+    val text = String(head, 0, read, Charsets.UTF_8).trim()
+    return if (text.startsWith("#EXTM3U")) {
+        "Este stream e uma playlist HLS (.m3u8), ainda sem suporte para download."
+    } else {
+        val snippet = text.replace(Regex("\\s+"), " ").take(160)
+        "O servidor nao devolveu um video ($size B): $snippet"
+    }
+}

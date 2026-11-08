@@ -175,6 +175,12 @@ internal class AndroidDownloadScheduler(val context: Context) {
                 },
             )
             currentCoroutineContext().ensureActive()
+            if (partial != destination) {
+                detectUnexpectedTextResponse(partial)?.let { reason ->
+                    partial.delete()
+                    throw DownloadInvalidContentException(reason)
+                }
+            }
             updateActive(transfer) { current ->
                 if (partial != destination && !partial.renameTo(destination)) {
                     throw IOException("Could not finalize the downloaded file")
