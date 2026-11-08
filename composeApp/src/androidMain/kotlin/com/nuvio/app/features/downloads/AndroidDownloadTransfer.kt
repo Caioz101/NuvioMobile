@@ -1,5 +1,7 @@
 package com.nuvio.app.features.downloads
 
+import com.nuvio.app.core.network.IPv4FirstDns
+import com.nuvio.app.features.player.PlayerPlaybackNetworking
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -17,6 +19,7 @@ internal val downloadHttpClient = OkHttpClient.Builder()
     .connectTimeout(60, TimeUnit.SECONDS)
     .readTimeout(60, TimeUnit.SECONDS)
     .writeTimeout(60, TimeUnit.SECONDS)
+    .dns(IPv4FirstDns())
     .followRedirects(true)
     .followSslRedirects(true)
     .build()
@@ -48,6 +51,9 @@ internal suspend fun transferAndroidDownload(
                             !key.equals("Accept-Encoding", true)) header(key, value)
                     }
                     header("Accept-Encoding", "identity")
+                    if (item.sourceHeaders.keys.none { it.equals("User-Agent", true) }) {
+                        header("User-Agent", PlayerPlaybackNetworking.DEFAULT_USER_AGENT)
+                    }
                     if (offset > 0L) {
                         header("Range", "bytes=$offset-")
                         validator?.let { header("If-Range", it) }

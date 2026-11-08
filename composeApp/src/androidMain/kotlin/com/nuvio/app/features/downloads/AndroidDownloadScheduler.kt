@@ -19,6 +19,7 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import java.io.File
 import java.io.IOException
+import java.net.Inet4Address
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -146,7 +147,7 @@ internal class AndroidDownloadScheduler(val context: Context) {
         val client = if (network != null) {
             downloadHttpClient.newBuilder()
                 .socketFactory(network.socketFactory)
-                .dns { network.getAllByName(it).toList() }
+                .dns { host -> network.getAllByName(host).sortedBy { address -> if (address is Inet4Address) 0 else 1 } }
                 .connectionPool(ConnectionPool())
                 .build()
         } else downloadHttpClient
