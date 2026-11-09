@@ -41,7 +41,7 @@ internal actual suspend fun verifyTorrentSource(
 
         P2pSettingsRepository.ensureLoaded()
         val settings = P2pSettingsRepository.uiState.value
-        verifierEngine = NuvioEngine.create(
+        val activeEngine = NuvioEngine.create(
             buildNuvioEngineConfig(
                 stateDirectory = stateDirectory,
                 cacheDirectory = cacheDirectory,
@@ -50,8 +50,7 @@ internal actual suspend fun verifyTorrentSource(
                 diskCacheCapacityBytes = TORRENT_CHECK_CACHE_BYTES,
             ),
         )
-
-        val activeEngine = verifierEngine
+        verifierEngine = activeEngine
         val verification = withTimeoutOrNull(timeoutMs) {
             val canonicalHash = canonicalP2pInfoHash(request.infoHash)
             val magnetUri = buildP2pMagnetUri(canonicalHash, request.trackers)
