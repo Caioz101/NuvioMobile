@@ -157,6 +157,19 @@ data class P2pStreamRequest(
     val trackers: List<String> = emptyList(),
 )
 
+data class P2pTorrentVerificationResult(
+    val available: Boolean,
+    val seeds: Int = 0,
+    val fileName: String? = null,
+    val fileSize: Long = 0L,
+    val reason: String? = null,
+)
+
+internal expect suspend fun verifyTorrentSource(
+    request: P2pStreamRequest,
+    timeoutMs: Long = 12_000L,
+): P2pTorrentVerificationResult
+
 internal fun canonicalP2pInfoHash(infoHash: String): String {
     val canonical = infoHash.trim().lowercase()
     require((canonical.length == 40 || canonical.length == 64) &&

@@ -133,7 +133,7 @@ actual object P2pStreamingEngine {
     private var currentTorrentId: String? = null
     @Volatile
     private var currentStreamId: String? = null
-    private var appContext: Context? = null
+    internal var appContext: Context? = null
     @Volatile
     private var engine: NuvioEngine? = null
     private var engineConfigurationKey: EngineConfigurationKey? = null
