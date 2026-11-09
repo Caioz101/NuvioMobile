@@ -587,6 +587,9 @@ private fun String.fileExtensionFromUrl(): String {
         .lowercase()
         .trim()
 
+    // An HLS playlist URL is not the file we save: segments are joined into an MPEG-TS stream.
+    if (suffix == "m3u8") return "ts"
+
     return if (suffix.length in 2..5 && suffix.all { it.isLetterOrDigit() }) {
         suffix
     } else {
@@ -597,7 +600,9 @@ private fun String.fileExtensionFromUrl(): String {
 private fun String.isSupportedDownloadUrl(): Boolean {
     val normalized = trim().lowercase()
     if (normalized.startsWith("magnet:")) return false
-    if (normalized.endsWith(".m3u8") || normalized.contains(".m3u8?")) return false
+    if (!platformSupportsHlsDownloads() &&
+        (normalized.endsWith(".m3u8") || normalized.contains(".m3u8?"))
+    ) return false
     if (normalized.endsWith(".mpd") || normalized.contains(".mpd?")) return false
     if (normalized.endsWith(".torrent") || normalized.contains(".torrent?")) return false
     return normalized.startsWith("http://") || normalized.startsWith("https://")

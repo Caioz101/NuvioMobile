@@ -49,7 +49,17 @@ internal suspend fun transferAndroidDownload(
     onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
 ): File {
     if (!item.isP2pTorrent) {
-        return transferHttpFile(item, item.sourceUrl, directory, validator, client, onHeaders, onProgress)
+        // HLS: known .m3u8 URLs, or a download that already started as HLS (resume sidecar exists).
+        if (isHlsUrl(item.sourceUrl) || hlsStateFile(directory, item.fileName).isFile) {
+            return transferHlsDownload(item, directory, client, onHeaders, onProgress)
+        }
+        val file = transferHttpFile(item, item.sourceUrl, directory, validator, client, onHeaders, onProgress)
+        // The URL did not look like HLS but the server answered with a playlist (proxies, redirects).
+        if (looksLikeHlsPlaylist(file)) {
+            file.delete()
+            return transferHlsDownload(item, directory, client, onHeaders, onProgress)
+        }
+        return file
     }
     return p2pDownloadMutex.withLock {
         val localUrl = startP2pDownloadStream(item)
