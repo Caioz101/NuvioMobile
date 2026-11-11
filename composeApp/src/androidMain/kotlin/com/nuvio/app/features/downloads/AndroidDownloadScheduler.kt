@@ -3,9 +3,14 @@ package com.nuvio.app.features.downloads
 import android.app.job.JobInfo
 import android.app.job.JobScheduler
 import android.content.ComponentName
+import android.content.ContentValues
 import android.content.Context
 import android.net.Network
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.webkit.MimeTypeMap
 import android.os.PersistableBundle
 import android.os.SystemClock
 import androidx.annotation.RequiresApi
@@ -189,13 +194,13 @@ internal class AndroidDownloadScheduler(val context: Context) {
                 }
             }
             updateActive(transfer) { current ->
-                if (partial != destination && !partial.renameTo(destination)) {
-                    throw IOException("Could not finalize the downloaded file")
-                }
-                val bytes = destination.length()
+                val publishedUri = if (partial == destination) destination.toURI().toString()
+                    else publishToPublicDownloads(context, partial)
+                val bytes = partial.length()
+                if (partial != destination) partial.delete()
                 current.copy(item = current.item.copy(
                     status = DownloadStatus.Completed,
-                    localFileUri = destination.toURI().toString(),
+                    localFileUri = publishedUri,
                     downloadedBytes = bytes,
                     totalBytes = bytes,
                     errorMessage = null,
@@ -255,3 +260,38 @@ internal fun shouldRetryAndroidDownload(error: Exception, retries: Int): Boolean
         is IOException -> true
         else -> false
     }
+
+
+/** Publishes completed downloads in the user's public Downloads/Nuvio folder. */
+private fun publishToPublicDownloads(context: Context, source: File): String {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val resolver = context.contentResolver
+        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(source.extension.lowercase())
+            ?: "application/octet-stream"
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, source.name)
+            put(MediaStore.Downloads.MIME_TYPE, mimeType)
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Nuvio")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IOException("Não foi possível criar o arquivo em Downloads/Nuvio")
+        try {
+            resolver.openOutputStream(uri, "w")?.use { output ->
+                source.inputStream().use { input -> input.copyTo(output) }
+            } ?: throw IOException("Não foi possível gravar o arquivo em Downloads/Nuvio")
+            resolver.update(uri, ContentValues().apply {
+                put(MediaStore.Downloads.IS_PENDING, 0)
+            }, null, null)
+            return uri.toString()
+        } catch (error: Exception) {
+            resolver.delete(uri, null, null)
+            throw error
+        }
+    }
+    val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Nuvio")
+    if (!folder.isDirectory && !folder.mkdirs()) throw IOException("Não foi possível criar Downloads/Nuvio")
+    val target = File(folder, source.name)
+    source.inputStream().use { input -> target.outputStream().use { output -> input.copyTo(output) } }
+    return target.toURI().toString()
+}
