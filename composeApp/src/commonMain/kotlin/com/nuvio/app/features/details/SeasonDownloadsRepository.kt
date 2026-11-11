@@ -43,9 +43,8 @@ internal object SeasonDownloadsRepository {
         scope.launch {
             var queued = 0
             var unavailable = 0
-            try {
-                DownloadsRepository.ensureLoaded()
-                for (episode in episodes) {
+            DownloadsRepository.ensureLoaded()
+            for (episode in episodes) {
                     try {
                         val state = StreamsRepository.loadForBatch(
                             type = contentType,
@@ -113,11 +112,10 @@ internal object SeasonDownloadsRepository {
                     }
                 }
 
-                NuvioToastController.show(
-                    if (unavailable == 0) "$queued episodes added to downloads"
-                    else "$queued episodes added; $unavailable unavailable",
-                )
-            }
+            NuvioToastController.show(
+                if (unavailable == 0) "$queued episodes added to downloads"
+                else "$queued episodes added; $unavailable unavailable",
+            )
         }
     }
 }
