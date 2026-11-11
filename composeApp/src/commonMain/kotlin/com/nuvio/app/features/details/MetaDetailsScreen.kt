@@ -1530,35 +1530,16 @@ fun MetaDetailsScreen(
                                                     episodeNumber = episodeNumber,
                                                     fallbackVideoId = video.id,
                                                 )
-                                            val requestToken = StreamsRepository.requestToken(
-                                                type = meta.type,
-                                                videoId = streamVideoId,
-                                                season = episodeSeason,
-                                                episode = episodeNumber,
-                                                manualSelection = true,
-                                            )
-                                            StreamsRepository.load(
+                                            // Use an isolated stream-loading session for this episode.
+                                            // It runs the same provider pipeline as the manual source page,
+                                            // without sharing/cancelling the visible screen's global state.
+                                            val streamState = StreamsRepository.loadForBatch(
                                                 type = meta.type,
                                                 videoId = streamVideoId,
                                                 parentMetaId = meta.id,
                                                 season = episodeSeason,
                                                 episode = episodeNumber,
-                                                manualSelection = true,
                                             )
-                                            // Wait for this request to actually enter the stream-loading
-                                            // pipeline before accepting its completed state. The repository
-                                            // first publishes a token-only, non-loading state; treating that
-                                            // transient state as completion caused batch downloads to see
-                                            // an empty stream list and silently skip the episode.
-                                            val streamState = withTimeoutOrNull(120_000L) {
-                                                StreamsRepository.uiState.first { state ->
-                                                    state.requestToken == requestToken &&
-                                                        !state.isAnyLoading &&
-                                                        state.groups.none { it.isLoading } &&
-                                                        (state.groups.isNotEmpty() ||
-                                                            state.emptyStateReason != null)
-                                                }
-                                            }
                                             val candidateStreams = streamState?.groups
                                                 ?.flatMap { it.streams }
                                                 ?.filter { candidate ->
