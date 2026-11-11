@@ -1540,13 +1540,10 @@ fun MetaDetailsScreen(
                                                 season = episodeSeason,
                                                 episode = episodeNumber,
                                             )
+                                            // Match the manual action sheet: offer every source to the
+                                            // download repository in the same order shown on the source page.
                                             val candidateStreams = streamState?.groups
                                                 ?.flatMap { it.streams }
-                                                ?.filter { candidate ->
-                                                    candidate.playableDirectUrl != null ||
-                                                        candidate.isTorrentStream ||
-                                                        DirectDebridPlaybackResolver.shouldResolveToPlayableStream(candidate)
-                                                }
                                                 .orEmpty()
 
                                             var episodeQueued = false
