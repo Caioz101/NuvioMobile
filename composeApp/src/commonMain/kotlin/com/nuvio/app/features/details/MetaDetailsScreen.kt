@@ -103,8 +103,6 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import com.nuvio.app.features.downloads.DownloadsRepository
 import com.nuvio.app.features.downloads.DownloadEnqueueResult
-import com.nuvio.app.features.details.SeasonDownloadsRepository
-import com.nuvio.app.features.details.SeasonDownloadEpisode
 import com.nuvio.app.features.streams.StreamsRepository
 import com.nuvio.app.features.debrid.DirectDebridPlaybackResolver
 import com.nuvio.app.features.debrid.DirectDebridPlayableResult
