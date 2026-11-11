@@ -1523,13 +1523,15 @@ fun MetaDetailsScreen(
                                         seasonEpisodes.forEach { video ->
                                             val episodeSeason = video.season ?: selectedSeason
                                             val episodeNumber = video.episode ?: return@forEach
-                                            val streamVideoId = video.id.takeIf { it.isNotBlank() }
-                                                ?: buildPlaybackVideoId(
-                                                    parentMetaId = meta.id,
-                                                    seasonNumber = episodeSeason,
-                                                    episodeNumber = episodeNumber,
-                                                    fallbackVideoId = video.id,
-                                                )
+                                            // Use the same canonical playback ID used by normal episode playback.
+                                            // Provider requests must identify each episode as seriesId:season:episode,
+                                            // not reuse the metadata/catalog episode ID.
+                                            val streamVideoId = buildPlaybackVideoId(
+                                                parentMetaId = meta.id,
+                                                seasonNumber = episodeSeason,
+                                                episodeNumber = episodeNumber,
+                                                fallbackVideoId = video.id,
+                                            )
                                             // Use an isolated stream-loading session for this episode.
                                             // It runs the same provider pipeline as the manual source page,
                                             // without sharing/cancelling the visible screen's global state.
