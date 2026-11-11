@@ -1515,6 +1515,7 @@ fun MetaDetailsScreen(
                                 },
                                 onDownloadSeason = {
                                     selectedSeasonForActions = null
+                                    NuvioToastController.show("Preparing season downloads...")
                                     detailsScope.launch {
                                         DownloadsRepository.ensureLoaded()
                                         var queued = 0
@@ -1553,9 +1554,9 @@ fun MetaDetailsScreen(
                                                 StreamsRepository.uiState.first { state ->
                                                     state.requestToken == requestToken &&
                                                         !state.isAnyLoading &&
+                                                        state.groups.none { it.isLoading } &&
                                                         (state.groups.isNotEmpty() ||
-                                                            state.emptyStateReason != null ||
-                                                            state.autoPlayDecided)
+                                                            state.emptyStateReason != null)
                                                 }
                                             }
                                             val candidateStreams = streamState?.groups
