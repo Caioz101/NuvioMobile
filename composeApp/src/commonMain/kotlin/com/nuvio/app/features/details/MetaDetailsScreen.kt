@@ -1558,7 +1558,7 @@ fun MetaDetailsScreen(
                                                 }
                                             if (stream == null) {
                                                 unavailable += 1
-                                                continue
+                                                return@forEach
                                             }
                                             val playableStream = if (
                                                 DirectDebridPlaybackResolver.shouldResolveToPlayableStream(stream)
@@ -1578,7 +1578,7 @@ fun MetaDetailsScreen(
                                             }
                                             if (playableStream == null) {
                                                 unavailable += 1
-                                                continue
+                                                return@forEach
                                             }
                                             when (
                                                 DownloadsRepository.enqueueFromStream(
