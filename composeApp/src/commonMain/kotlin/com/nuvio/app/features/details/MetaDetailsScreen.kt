@@ -103,6 +103,8 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import com.nuvio.app.features.downloads.DownloadsRepository
 import com.nuvio.app.features.downloads.DownloadEnqueueResult
+import com.nuvio.app.features.details.SeasonDownloadsRepository
+import com.nuvio.app.features.details.SeasonDownloadEpisode
 import com.nuvio.app.features.streams.StreamsRepository
 import com.nuvio.app.features.debrid.DirectDebridPlaybackResolver
 import com.nuvio.app.features.debrid.DirectDebridPlayableResult
@@ -1515,100 +1517,32 @@ fun MetaDetailsScreen(
                                 },
                                 onDownloadSeason = {
                                     selectedSeasonForActions = null
-                                    NuvioToastController.show("Preparing season downloads...")
-                                    detailsScope.launch {
-                                        DownloadsRepository.ensureLoaded()
-                                        var queued = 0
-                                        var unavailable = 0
-                                        seasonEpisodes.forEach { video ->
+                                    SeasonDownloadsRepository.start(
+                                        contentType = meta.type,
+                                        parentMetaId = meta.id,
+                                        title = meta.name,
+                                        logo = meta.logo,
+                                        poster = meta.poster,
+                                        background = meta.background,
+                                        seasonNumber = selectedSeason,
+                                        episodes = seasonEpisodes.mapNotNull { video ->
                                             val episodeSeason = video.season ?: selectedSeason
-                                            val episodeNumber = video.episode ?: return@forEach
-                                            // Use the same canonical playback ID used by normal episode playback.
-                                            // Provider requests must identify each episode as seriesId:season:episode,
-                                            // not reuse the metadata/catalog episode ID.
-                                            val streamVideoId = buildPlaybackVideoId(
-                                                parentMetaId = meta.id,
+                                            val episodeNumber = video.episode ?: return@mapNotNull null
+                                            SeasonDownloadEpisode(
+                                                videoId = buildPlaybackVideoId(
+                                                    parentMetaId = meta.id,
+                                                    seasonNumber = episodeSeason,
+                                                    episodeNumber = episodeNumber,
+                                                    fallbackVideoId = video.id,
+                                                ),
                                                 seasonNumber = episodeSeason,
                                                 episodeNumber = episodeNumber,
-                                                fallbackVideoId = video.id,
+                                                title = video.title,
+                                                thumbnail = video.thumbnail,
                                             )
-                                            // Use an isolated stream-loading session for this episode.
-                                            // It runs the same provider pipeline as the manual source page,
-                                            // without sharing/cancelling the visible screen's global state.
-                                            val streamState = StreamsRepository.loadForBatch(
-                                                type = meta.type,
-                                                videoId = streamVideoId,
-                                                parentMetaId = meta.id,
-                                                season = episodeSeason,
-                                                episode = episodeNumber,
-                                            )
-                                            // Match the manual action sheet: offer every source to the
-                                            // download repository in the same order shown on the source page.
-                                            val candidateStreams = streamState?.groups
-                                                ?.flatMap { it.streams }
-                                                .orEmpty()
-
-                                            var episodeQueued = false
-                                            for (candidate in candidateStreams) {
-                                                val playableStream = try {
-                                                    if (DirectDebridPlaybackResolver.shouldResolveToPlayableStream(candidate)) {
-                                                        when (
-                                                            val resolved = DirectDebridPlaybackResolver.resolveToPlayableStream(
-                                                                stream = candidate,
-                                                                season = episodeSeason,
-                                                                episode = episodeNumber,
-                                                            )
-                                                        ) {
-                                                            is DirectDebridPlayableResult.Success -> resolved.stream
-                                                            else -> null
-                                                        }
-                                                    } else {
-                                                        candidate
-                                                    }
-                                                } catch (_: Exception) {
-                                                    null
-                                                } ?: continue
-
-                                                val enqueueResult = runCatching {
-                                                    DownloadsRepository.enqueueFromStream(
-                                                        contentType = meta.type,
-                                                        videoId = streamVideoId,
-                                                        parentMetaId = meta.id,
-                                                        parentMetaType = meta.type,
-                                                        title = meta.name,
-                                                        logo = meta.logo,
-                                                        poster = meta.poster,
-                                                        background = meta.background,
-                                                        seasonNumber = episodeSeason,
-                                                        episodeNumber = episodeNumber,
-                                                        episodeTitle = video.title,
-                                                        episodeThumbnail = video.thumbnail,
-                                                        stream = playableStream,
-                                                    )
-                                                }.getOrNull()
-
-                                                if (
-                                                    enqueueResult == DownloadEnqueueResult.Started ||
-                                                    enqueueResult == DownloadEnqueueResult.Replaced
-                                                ) {
-                                                    queued += 1
-                                                    episodeQueued = true
-                                                    break
-                                                }
-                                            }
-
-                                            if (!episodeQueued) {
-                                                unavailable += 1
-                                            }
-                                        }
-                                        NuvioToastController.show(
-                                            if (unavailable == 0) {
-                                                "$queued episodes added to downloads"
-                                            } else {
-                                                "$queued episodes added; $unavailable unavailable"
-                                            },
-                                        )
-                                    }
+                                        },
+                                    )
+                                }
                                 },
                             )
                         }
