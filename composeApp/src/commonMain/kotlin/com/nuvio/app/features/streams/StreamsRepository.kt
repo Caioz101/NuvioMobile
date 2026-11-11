@@ -25,19 +25,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
 import kotlinx.coroutines.launch
 
+private class StreamsLoadSession(
+    val state: MutableStateFlow<StreamsUiState> = MutableStateFlow(StreamsUiState()),
+    val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+) {
+    var activeJob: Job? = null
+    var activeRequestKey: String? = null
+}
+
 object StreamsRepository {
     private val log = Logger.withTag("StreamsRepo")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val _uiState = MutableStateFlow(StreamsUiState())
-    val uiState: StateFlow<StreamsUiState> = _uiState.asStateFlow()
-
-    private var activeJob: Job? = null
-    private var activeRequestKey: String? = null
+    private val uiSession = StreamsLoadSession()
+    val uiState: StateFlow<StreamsUiState> = uiSession.state.asStateFlow()
 
     fun requestToken(
         type: String,
@@ -58,6 +64,7 @@ object StreamsRepository {
             episode = episode,
             manualSelection = manualSelection,
             forceRefresh = false,
+            session = uiSession,
         )
     }
 
@@ -71,10 +78,20 @@ object StreamsRepository {
             episode = episode,
             manualSelection = manualSelection,
             forceRefresh = true,
+            session = uiSession,
         )
     }
 
-    private fun load(type: String, videoId: String, parentMetaId: String?, season: Int?, episode: Int?, manualSelection: Boolean, forceRefresh: Boolean) {
+    private fun load(
+        type: String,
+        videoId: String,
+        parentMetaId: String?,
+        season: Int?,
+        episode: Int?,
+        manualSelection: Boolean,
+        forceRefresh: Boolean,
+        session: StreamsLoadSession,
+    ) {
         val pluginUiState = if (AppFeaturePolicy.pluginsEnabled) {
             PluginRepository.initialize()
             PluginRepository.uiState.value
@@ -89,19 +106,19 @@ object StreamsRepository {
             manualSelection = manualSelection,
         )
         val requestKey = "$requestToken::pluginsGrouped=${pluginUiState.groupStreamsByRepository}"
-        val currentState = _uiState.value
+        val currentState = session.state.value
         if (
             !forceRefresh &&
-            activeRequestKey == requestKey &&
+            session.activeRequestKey == requestKey &&
             (currentState.groups.isNotEmpty() || currentState.emptyStateReason != null || currentState.isAnyLoading)
         ) {
             log.d { "Skipping stream reload for unchanged request type=$type id=$videoId" }
             return
         }
 
-        activeRequestKey = requestKey
-        activeJob?.cancel()
-        _uiState.value = StreamsUiState(requestToken = requestToken)
+        session.activeRequestKey = requestKey
+        session.activeJob?.cancel()
+        session.state.value = StreamsUiState(requestToken = requestToken)
 
         PlayerSettingsRepository.ensureLoaded()
         val playerSettings = PlayerSettingsRepository.uiState.value
@@ -134,7 +151,7 @@ object StreamsRepository {
         val isDirectAutoPlayFlow = isAutoPlayEnabled || bingeGroupDirectFlow
 
         if (isDirectAutoPlayFlow) {
-            _uiState.value = StreamsUiState(
+            session.state.value = StreamsUiState(
                 requestToken = requestToken,
                 isDirectAutoPlayFlow = true,
                 autoPlayDecided = true,
@@ -155,7 +172,7 @@ object StreamsRepository {
                 groups = listOf(group),
                 rules = streamBadgeRules,
             ).firstOrNull() ?: group
-            _uiState.value = StreamsUiState(
+            session.state.value = StreamsUiState(
                 requestToken = requestToken,
                 groups = listOf(presentedGroup),
                 autoPlayDecided = true,
@@ -180,7 +197,7 @@ object StreamsRepository {
         )
 
         if (installedAddons.isEmpty() && pluginProviderGroups.isEmpty() && serverSources.isEmpty()) {
-            _uiState.value = StreamsUiState(
+            session.state.value = StreamsUiState(
                 requestToken = requestToken,
                 isAnyLoading = false,
                 emptyStateReason = StreamsEmptyStateReason.NoAddonsInstalled,
@@ -204,7 +221,7 @@ object StreamsRepository {
         log.d { "Found ${streamAddons.size} addons for stream type=$type id=$videoId" }
 
         if (streamAddons.isEmpty() && pluginProviderGroups.isEmpty() && serverSources.isEmpty()) {
-            _uiState.value = StreamsUiState(
+            session.state.value = StreamsUiState(
                 requestToken = requestToken,
                 isAnyLoading = false,
                 emptyStateReason = StreamsEmptyStateReason.NoCompatibleAddons,
@@ -231,7 +248,7 @@ object StreamsRepository {
             )
         } + serverSources.map { it.loadingGroup() }, installedAddonOrder, preferredGroupIds)
         val isInitiallyLoading = initialGroups.any { it.isLoading }
-        _uiState.value = StreamsUiState(
+        session.state.value = StreamsUiState(
             requestToken = requestToken,
             groups = initialGroups,
             activeAddonIds = initialGroups.map { it.addonId }.toSet(),
@@ -242,7 +259,7 @@ object StreamsRepository {
             showDirectAutoPlayOverlay = isDirectAutoPlayFlow,
         )
 
-        activeJob = scope.launch {
+        session.activeJob = session.scope.launch {
             val completions = Channel<StreamLoadCompletion>(capacity = Channel.BUFFERED)
             val pluginRemainingByAddonId = pluginProviderGroups
                 .associate { it.addonId to it.scrapers.size }
@@ -259,7 +276,7 @@ object StreamsRepository {
             var timeoutElapsed = false
             fun evaluateAutoPlay(bingeGroupOnly: Boolean = false): StreamAutoPlayEvaluation =
                 StreamAutoPlaySelector.evaluateAutoPlayStream(
-                    streams = _uiState.value.groups.flatMap { it.streams },
+                    streams = session.state.value.groups.flatMap { it.streams },
                     mode = autoPlayMode,
                     regexPattern = playerSettings.streamAutoPlayRegex,
                     source = playerSettings.streamAutoPlaySource,
@@ -276,7 +293,7 @@ object StreamsRepository {
             fun settleAutoPlay(evaluation: StreamAutoPlayEvaluation) {
                 if (autoSelectTriggered) return
                 autoSelectTriggered = true
-                _uiState.update { current ->
+                session.state.update { current ->
                     if (evaluation.stream == null) {
                         current.copy(
                             autoPlayStream = null,
@@ -298,7 +315,7 @@ object StreamsRepository {
 
                 // Try binge group + filename first (most precise), then infoHash
                 if (persistedBingeGroup != null && !timeoutElapsed) {
-                    val allStreams = _uiState.value.groups.flatMap { it.streams }
+                    val allStreams = session.state.value.groups.flatMap { it.streams }
                     // Filename match
                     if (persistedFilename != null) {
                         val nextFilename = run {
@@ -342,7 +359,7 @@ object StreamsRepository {
                 }
 
                 if (
-                    _uiState.value.groups.areAutoPlaySourcesLoaded(
+                    session.state.value.groups.areAutoPlaySourcesLoaded(
                         source = playerSettings.streamAutoPlaySource,
                         installedAddonIds = installedAddonIds,
                     )
@@ -369,7 +386,7 @@ object StreamsRepository {
             }
 
             fun publishAddonGroup(group: AddonStreamGroup) {
-                _uiState.update { current ->
+                session.state.update { current ->
                     val updated = StreamAutoPlaySelector.orderAddonStreams(
                         groups = current.groups.map { currentGroup ->
                             if (currentGroup.addonId == group.addonId) group else currentGroup
@@ -447,7 +464,7 @@ object StreamsRepository {
                         delay(timeoutSeconds * 1_000L)
                         timeoutElapsed = true
                         if (!autoSelectTriggered) {
-                            val allStreams = _uiState.value.groups.flatMap { it.streams }
+                            val allStreams = session.state.value.groups.flatMap { it.streams }
                             if (allStreams.isNotEmpty()) {
                                 val evaluation = evaluateAutoPlay()
                                 if (evaluation.stream != null || !evaluation.hasPendingDebridCandidate) {
@@ -568,7 +585,7 @@ object StreamsRepository {
                             pluginFirstErrorByAddonId[completion.addonId] = completion.error
                         }
 
-                        _uiState.update { current ->
+                        session.state.update { current ->
                             val updated = StreamAutoPlaySelector.orderAddonStreams(
                                 groups = current.groups.map { group ->
                                     if (group.addonId != completion.addonId) {
@@ -614,7 +631,7 @@ object StreamsRepository {
 
             launch {
                 DirectDebridStreamPreparer.prepare(
-                    streams = _uiState.value.groups
+                    streams = session.state.value.groups
                         .filter { it.addonId in installedAddonIds }
                         .flatMap { it.streams },
                     season = season,
@@ -622,7 +639,7 @@ object StreamsRepository {
                     playerSettings = playerSettings,
                     installedAddonNames = installedAddonNames,
                 ) { original, prepared ->
-                    _uiState.update { current ->
+                    session.state.update { current ->
                         current.copy(
                             groups = DirectDebridStreamPreparer.replacePreparedStream(
                                 groups = current.groups,
@@ -640,6 +657,54 @@ object StreamsRepository {
                 settleAutoPlay(evaluateAutoPlay())
             }
             timeoutJob?.cancel()
+        }
+    }
+
+
+    /**
+     * Loads an episode's sources through the exact same provider pipeline as the
+     * manual source screen, but in a private state/session so batch work cannot
+     * cancel or overwrite the visible StreamsScreen request.
+     */
+    suspend fun loadForBatch(
+        type: String,
+        videoId: String,
+        parentMetaId: String?,
+        season: Int?,
+        episode: Int?,
+        timeoutMillis: Long = 120_000L,
+    ): StreamsUiState? {
+        val session = StreamsLoadSession()
+        val token = requestToken(
+            type = type,
+            videoId = videoId,
+            season = season,
+            episode = episode,
+            manualSelection = true,
+        )
+        return try {
+            PluginRepository.setLocalPluginSearchPaused(false)
+            load(
+                type = type,
+                videoId = videoId,
+                parentMetaId = parentMetaId,
+                season = season,
+                episode = episode,
+                manualSelection = true,
+                forceRefresh = true,
+                session = session,
+            )
+            kotlinx.coroutines.withTimeoutOrNull(timeoutMillis) {
+                session.state.first { state ->
+                    state.requestToken == token &&
+                        !state.isAnyLoading &&
+                        state.groups.none { it.isLoading } &&
+                        (state.groups.isNotEmpty() || state.emptyStateReason != null)
+                }
+            }
+        } finally {
+            session.activeJob?.cancel()
+            session.scope.coroutineContext[Job]?.cancel()
         }
     }
 
