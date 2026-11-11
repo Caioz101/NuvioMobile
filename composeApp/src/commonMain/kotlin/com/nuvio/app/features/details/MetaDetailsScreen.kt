@@ -1549,57 +1549,66 @@ fun MetaDetailsScreen(
                                                     state.requestToken == requestToken && !state.isAnyLoading
                                                 }
                                             }
-                                            val stream = streamState?.groups
+                                            val candidateStreams = streamState?.groups
                                                 ?.flatMap { it.streams }
-                                                ?.firstOrNull { candidate ->
+                                                ?.filter { candidate ->
                                                     candidate.playableDirectUrl != null ||
                                                         candidate.isTorrentStream ||
                                                         DirectDebridPlaybackResolver.shouldResolveToPlayableStream(candidate)
                                                 }
-                                            if (stream == null) {
-                                                unavailable += 1
-                                                return@forEach
-                                            }
-                                            val playableStream = if (
-                                                DirectDebridPlaybackResolver.shouldResolveToPlayableStream(stream)
-                                            ) {
-                                                when (
-                                                    val resolved = DirectDebridPlaybackResolver.resolveToPlayableStream(
-                                                        stream = stream,
-                                                        season = episodeSeason,
-                                                        episode = episodeNumber,
+                                                .orEmpty()
+
+                                            var episodeQueued = false
+                                            for (candidate in candidateStreams) {
+                                                val playableStream = try {
+                                                    if (DirectDebridPlaybackResolver.shouldResolveToPlayableStream(candidate)) {
+                                                        when (
+                                                            val resolved = DirectDebridPlaybackResolver.resolveToPlayableStream(
+                                                                stream = candidate,
+                                                                season = episodeSeason,
+                                                                episode = episodeNumber,
+                                                            )
+                                                        ) {
+                                                            is DirectDebridPlayableResult.Success -> resolved.stream
+                                                            else -> null
+                                                        }
+                                                    } else {
+                                                        candidate
+                                                    }
+                                                } catch (_: Exception) {
+                                                    null
+                                                } ?: continue
+
+                                                val enqueueResult = runCatching {
+                                                    DownloadsRepository.enqueueFromStream(
+                                                        contentType = meta.type,
+                                                        videoId = streamVideoId,
+                                                        parentMetaId = meta.id,
+                                                        parentMetaType = meta.type,
+                                                        title = meta.name,
+                                                        logo = meta.logo,
+                                                        poster = meta.poster,
+                                                        background = meta.background,
+                                                        seasonNumber = episodeSeason,
+                                                        episodeNumber = episodeNumber,
+                                                        episodeTitle = video.title,
+                                                        episodeThumbnail = video.thumbnail,
+                                                        stream = playableStream,
                                                     )
+                                                }.getOrNull()
+
+                                                if (
+                                                    enqueueResult == DownloadEnqueueResult.Started ||
+                                                    enqueueResult == DownloadEnqueueResult.Replaced
                                                 ) {
-                                                    is DirectDebridPlayableResult.Success -> resolved.stream
-                                                    else -> null
+                                                    queued += 1
+                                                    episodeQueued = true
+                                                    break
                                                 }
-                                            } else {
-                                                stream
                                             }
-                                            if (playableStream == null) {
+
+                                            if (!episodeQueued) {
                                                 unavailable += 1
-                                                return@forEach
-                                            }
-                                            when (
-                                                DownloadsRepository.enqueueFromStream(
-                                                    contentType = meta.type,
-                                                    videoId = streamVideoId,
-                                                    parentMetaId = meta.id,
-                                                    parentMetaType = meta.type,
-                                                    title = meta.name,
-                                                    logo = meta.logo,
-                                                    poster = meta.poster,
-                                                    background = meta.background,
-                                                    seasonNumber = episodeSeason,
-                                                    episodeNumber = episodeNumber,
-                                                    episodeTitle = video.title,
-                                                    episodeThumbnail = video.thumbnail,
-                                                    stream = playableStream,
-                                                )
-                                            ) {
-                                                DownloadEnqueueResult.Started,
-                                                DownloadEnqueueResult.Replaced -> queued += 1
-                                                else -> unavailable += 1
                                             }
                                         }
                                         NuvioToastController.show(
