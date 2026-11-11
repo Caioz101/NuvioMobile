@@ -41,7 +41,6 @@ private class StreamsLoadSession(
 
 object StreamsRepository {
     private val log = Logger.withTag("StreamsRepo")
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val uiSession = StreamsLoadSession()
     val uiState: StateFlow<StreamsUiState> = uiSession.state.asStateFlow()
 
@@ -709,12 +708,12 @@ object StreamsRepository {
     }
 
     fun selectFilter(addonId: String?) {
-        _uiState.update { it.copy(selectedFilter = addonId) }
+        uiSession.state.update { it.copy(selectedFilter = addonId) }
     }
 
     fun consumeAutoPlay() {
-        activeRequestKey = null
-        _uiState.update {
+        uiSession.activeRequestKey = null
+        uiSession.state.update {
             it.copy(
                 autoPlayStream = null,
                 autoPlayCandidates = emptyList(),
@@ -726,7 +725,7 @@ object StreamsRepository {
 
     fun skipAutoPlayStream(stream: StreamItem): Boolean {
         var hasNext = false
-        _uiState.update { current ->
+        uiSession.state.update { current ->
             val failedIndex = current.autoPlayCandidates.indexOf(stream)
             val remaining = if (failedIndex >= 0) {
                 current.autoPlayCandidates.drop(failedIndex + 1)
@@ -747,9 +746,9 @@ object StreamsRepository {
 
     fun cancelLoading() {
         PluginRepository.setLocalPluginSearchPaused(true)
-        activeJob?.cancel()
-        activeJob = null
-        _uiState.update { current ->
+        uiSession.activeJob?.cancel()
+        uiSession.activeJob = null
+        uiSession.state.update { current ->
             if (!current.isAnyLoading && current.groups.none { it.isLoading }) {
                 current
             } else {
@@ -771,13 +770,13 @@ object StreamsRepository {
 
     fun clear() {
         PluginRepository.setLocalPluginSearchPaused(true)
-        activeJob?.cancel()
-        activeJob = null
-        activeRequestKey = null
-        _uiState.value = StreamsUiState()
+        uiSession.activeJob?.cancel()
+        uiSession.activeJob = null
+        uiSession.activeRequestKey = null
+        uiSession.state.value = StreamsUiState()
     }
 
     fun setOverlayVisible(visible: Boolean, message: String? = null) {
-        _uiState.update { it.copy(showDirectAutoPlayOverlay = visible, overlayMessage = message) }
+        uiSession.state.update { it.copy(showDirectAutoPlayOverlay = visible, overlayMessage = message) }
     }
 }
