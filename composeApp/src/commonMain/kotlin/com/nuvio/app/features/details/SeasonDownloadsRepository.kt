@@ -9,7 +9,6 @@ import com.nuvio.app.features.streams.StreamsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
@@ -24,7 +23,6 @@ internal data class SeasonDownloadEpisode(
 /** Keeps season source discovery alive when the details screen is closed. */
 internal object SeasonDownloadsRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val activeJobs = mutableMapOf<String, Job>()
 
     fun start(
         contentType: String,
@@ -41,14 +39,8 @@ internal object SeasonDownloadsRepository {
             return
         }
 
-        val batchKey = "$parentMetaId:$seasonNumber"
-        if (activeJobs[batchKey]?.isActive == true) {
-            NuvioToastController.show("Season downloads are already being prepared")
-            return
-        }
-
         NuvioToastController.show("Preparing season downloads...")
-        activeJobs[batchKey] = scope.launch {
+        scope.launch {
             var queued = 0
             var unavailable = 0
             try {
@@ -125,8 +117,6 @@ internal object SeasonDownloadsRepository {
                     if (unavailable == 0) "$queued episodes added to downloads"
                     else "$queued episodes added; $unavailable unavailable",
                 )
-            } finally {
-                activeJobs.remove(batchKey)
             }
         }
     }
