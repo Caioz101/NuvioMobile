@@ -101,6 +101,13 @@ import com.nuvio.app.core.ui.rememberArtworkBackdrop
 import com.nuvio.app.core.ui.rememberHeroStretchState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import com.nuvio.app.features.downloads.DownloadsRepository
+import com.nuvio.app.features.downloads.DownloadEnqueueResult
+import com.nuvio.app.features.streams.StreamsRepository
+import com.nuvio.app.features.debrid.DirectDebridPlaybackResolver
+import com.nuvio.app.features.debrid.DirectDebridPlayableResult
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import com.nuvio.app.features.details.components.DetailActions
 import com.nuvio.app.features.details.components.CommentDetailSheet
 import com.nuvio.app.features.details.components.DetailAdditionalInfoSection
@@ -1505,6 +1512,104 @@ fun MetaDetailsScreen(
                                         episodes = previousSeasonEpisodes,
                                         areCurrentlyWatched = false,
                                     )
+                                },
+                                onDownloadSeason = {
+                                    selectedSeasonForActions = null
+                                    detailsScope.launch {
+                                        DownloadsRepository.ensureLoaded()
+                                        var queued = 0
+                                        var unavailable = 0
+                                        seasonEpisodes.forEach { video ->
+                                            val episodeSeason = video.season ?: selectedSeason
+                                            val episodeNumber = video.episode ?: return@forEach
+                                            val streamVideoId = video.id.takeIf { it.isNotBlank() }
+                                                ?: buildPlaybackVideoId(
+                                                    parentMetaId = meta.id,
+                                                    seasonNumber = episodeSeason,
+                                                    episodeNumber = episodeNumber,
+                                                    fallbackVideoId = video.id,
+                                                )
+                                            val requestToken = StreamsRepository.requestToken(
+                                                type = meta.type,
+                                                videoId = streamVideoId,
+                                                season = episodeSeason,
+                                                episode = episodeNumber,
+                                                manualSelection = true,
+                                            )
+                                            StreamsRepository.load(
+                                                type = meta.type,
+                                                videoId = streamVideoId,
+                                                parentMetaId = meta.id,
+                                                season = episodeSeason,
+                                                episode = episodeNumber,
+                                                manualSelection = true,
+                                            )
+                                            val streamState = withTimeoutOrNull(90_000L) {
+                                                StreamsRepository.uiState.first { state ->
+                                                    state.requestToken == requestToken && !state.isAnyLoading
+                                                }
+                                            }
+                                            val stream = streamState?.groups
+                                                ?.flatMap { it.streams }
+                                                ?.firstOrNull { candidate ->
+                                                    candidate.playableDirectUrl != null ||
+                                                        candidate.isTorrentStream ||
+                                                        DirectDebridPlaybackResolver.shouldResolveToPlayableStream(candidate)
+                                                }
+                                            if (stream == null) {
+                                                unavailable += 1
+                                                continue
+                                            }
+                                            val playableStream = if (
+                                                DirectDebridPlaybackResolver.shouldResolveToPlayableStream(stream)
+                                            ) {
+                                                when (
+                                                    val resolved = DirectDebridPlaybackResolver.resolveToPlayableStream(
+                                                        stream = stream,
+                                                        season = episodeSeason,
+                                                        episode = episodeNumber,
+                                                    )
+                                                ) {
+                                                    is DirectDebridPlayableResult.Success -> resolved.stream
+                                                    else -> null
+                                                }
+                                            } else {
+                                                stream
+                                            }
+                                            if (playableStream == null) {
+                                                unavailable += 1
+                                                continue
+                                            }
+                                            when (
+                                                DownloadsRepository.enqueueFromStream(
+                                                    contentType = meta.type,
+                                                    videoId = streamVideoId,
+                                                    parentMetaId = meta.id,
+                                                    parentMetaType = meta.type,
+                                                    title = meta.name,
+                                                    logo = meta.logo,
+                                                    poster = meta.poster,
+                                                    background = meta.background,
+                                                    seasonNumber = episodeSeason,
+                                                    episodeNumber = episodeNumber,
+                                                    episodeTitle = video.title,
+                                                    episodeThumbnail = video.thumbnail,
+                                                    stream = playableStream,
+                                                )
+                                            ) {
+                                                DownloadEnqueueResult.Started,
+                                                DownloadEnqueueResult.Replaced -> queued += 1
+                                                else -> unavailable += 1
+                                            }
+                                        }
+                                        NuvioToastController.show(
+                                            if (unavailable == 0) {
+                                                "$queued episodes added to downloads"
+                                            } else {
+                                                "$queued episodes added; $unavailable unavailable"
+                                            },
+                                        )
+                                    }
                                 },
                             )
                         }
