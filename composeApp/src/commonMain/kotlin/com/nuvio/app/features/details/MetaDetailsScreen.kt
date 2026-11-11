@@ -1544,9 +1544,18 @@ fun MetaDetailsScreen(
                                                 episode = episodeNumber,
                                                 manualSelection = true,
                                             )
-                                            val streamState = withTimeoutOrNull(90_000L) {
+                                            // Wait for this request to actually enter the stream-loading
+                                            // pipeline before accepting its completed state. The repository
+                                            // first publishes a token-only, non-loading state; treating that
+                                            // transient state as completion caused batch downloads to see
+                                            // an empty stream list and silently skip the episode.
+                                            val streamState = withTimeoutOrNull(120_000L) {
                                                 StreamsRepository.uiState.first { state ->
-                                                    state.requestToken == requestToken && !state.isAnyLoading
+                                                    state.requestToken == requestToken &&
+                                                        !state.isAnyLoading &&
+                                                        (state.groups.isNotEmpty() ||
+                                                            state.emptyStateReason != null ||
+                                                            state.autoPlayDecided)
                                                 }
                                             }
                                             val candidateStreams = streamState?.groups
