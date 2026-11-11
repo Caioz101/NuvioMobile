@@ -6,7 +6,6 @@ import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
 import android.net.Network
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -269,10 +268,10 @@ private fun publishToPublicDownloads(context: Context, source: File): String {
         val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(source.extension.lowercase())
             ?: "application/octet-stream"
         val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, source.name)
-            put(MediaStore.Downloads.MIME_TYPE, mimeType)
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Nuvio")
-            put(MediaStore.Downloads.IS_PENDING, 1)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Nuvio")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: throw IOException("Não foi possível criar o arquivo em Downloads/Nuvio")
